@@ -123,11 +123,10 @@ received NULL value
         postgres_output none;
         postgres_set $name 0 0 required;
         add_header X-Name "[$name]";
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Name: []
 --- error_log
@@ -147,11 +146,10 @@ requires non-NULL value
         postgres_output none;
         postgres_set $name 0 0 required;
         add_header X-Name "[$name]";
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Name: []
 --- error_log
@@ -171,11 +169,10 @@ out of range of the received result-set
         postgres_output none;
         postgres_set $paws 0 paws required;
         add_header X-Paws "[$paws]";
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Paws: []
 --- error_log

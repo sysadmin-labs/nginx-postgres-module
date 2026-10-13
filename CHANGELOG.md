@@ -6,6 +6,27 @@ Newest first.  Dates are release dates.
 
 ### Fixed
 
+- **Every request answered 502 on nginx 1.30 and later.**  That release
+  brought the change "now the keepalive directive in the upstream block is
+  enabled by default", and its keepalive module walks every explicit
+  upstream in its `init_main_conf`: an upstream that says nothing about
+  keepalive is no longer left alone, because `max_cached` arrives unset and
+  that code reads unset as "use 32", not as "off".  It then replaces
+  `uscf->peer.init` with its own.
+
+  For this module that is fatal.  A connection here is not a socket, it is a
+  `PGconn` with a state machine on it, and a request handed a connection out
+  of nginx's cache gets a socket this module knows nothing about.  The module
+  notices -- that is what `ngx_postgres_upstream_is_my_peer()` is for -- and
+  answers 502 with "postgres: trying to connect to something that is not
+  PostgreSQL database".
+
+  A module's `postconfiguration` runs after every `init_main_conf`, so the
+  peer is claimed back there.  nginx's keepalive cache stays allocated and
+  unused, which costs a few hundred bytes per upstream and nothing else;
+  this module has its own pool, `postgres_keepalive`, which knows what a
+  connection here actually is.
+
 - The module did not build with gcc 12 or later.  `if (pgdt->statements)`
   asks whether an array inside a structure is NULL, which it never is, and
   `-Werror=address` refuses the comparison.  Behind that one line were two

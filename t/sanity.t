@@ -159,11 +159,10 @@ GET /t
         postgres_output none;
         add_header X-Rows $postgres_rows;
         add_header X-Columns $postgres_columns;
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Rows: 3
 X-Columns: 3
@@ -182,11 +181,10 @@ X-Columns: 3
         postgres_output none;
         postgres_set $first_name 0 1 required;
         add_header X-Name $first_name;
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Name: bob
 
@@ -204,11 +202,10 @@ X-Name: bob
         postgres_output none;
         postgres_set $paws 0 paws required;
         add_header X-Paws $paws;
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Paws: 4
 
@@ -226,11 +223,10 @@ X-Paws: 4
         postgres_output none;
         postgres_set $name 0 0 optional;
         add_header X-Name "[$name]";
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Name: []
 
@@ -247,11 +243,10 @@ X-Name: []
         postgres_query "insert into scratch (name) values ('one'), ('two')";
         postgres_output none;
         add_header X-Affected $postgres_affected;
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Affected: 2
 
@@ -268,11 +263,10 @@ X-Affected: 2
         postgres_query "select 1 as one";
         postgres_output none;
         add_header X-Query $postgres_query;
-        return 204;
     }
 --- request
 GET /t
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Query: select 1 as one
 
@@ -372,11 +366,10 @@ was null
         postgres_output none;
         postgres_set $given 0 0 optional;
         add_header X-Given "[$given]";
-        return 204;
     }
 --- request
 GET /t?name=
---- error_code: 204
+--- error_code: 200
 --- response_headers
 X-Given: []
 

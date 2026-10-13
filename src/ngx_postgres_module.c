@@ -144,9 +144,12 @@ static ngx_http_variable_t ngx_postgres_module_variables[] = {
     { ngx_null_string, NULL, NULL, 0, 0, 0 }
 };
 
+static ngx_int_t ngx_postgres_postconfiguration(ngx_conf_t *cf);
+
+
 static ngx_http_module_t ngx_postgres_module_ctx = {
     ngx_postgres_add_variables,             /* preconfiguration */
-    NULL,                                   /* postconfiguration */
+    ngx_postgres_postconfiguration,         /* postconfiguration */
 
     NULL,                                   /* create main configuration */
     NULL,                                   /* init main configuration */
@@ -204,6 +207,77 @@ ngx_conf_enum_t ngx_postgres_upstream_overflow_options[] = {
     { ngx_string("reject"), 1 },
     { ngx_null_string, 0 }
 };
+
+/* Take the peer back from nginx's own keepalive.
+ *
+ * nginx 1.30 brought this change: "now the keepalive directive in the
+ * upstream block is enabled by default".  Its keepalive module walks every
+ * explicit upstream in its init_main_conf, and an upstream that says nothing
+ * about keepalive is no longer left alone -- max_cached comes out of the
+ * configuration unset, which that code reads as "use the default of 32"
+ * rather than as "off", and it then replaces uscf->peer.init with its own.
+ *
+ * For this module that is fatal.  A connection here is not a socket, it is a
+ * PGconn with a state machine on it, and handing a request a connection out
+ * of nginx's cache gives it a socket this module knows nothing about.  The
+ * module notices -- ngx_postgres_upstream_is_my_peer() is exactly that
+ * check -- and every request answers 502 with "trying to connect to
+ * something that is not PostgreSQL database".
+ *
+ * A module's postconfiguration runs after every init_main_conf, so this is
+ * where the peer can be claimed back for good.  nginx's keepalive cache
+ * stays allocated and unused, which costs a few hundred bytes per upstream
+ * and nothing else.  This module has its own pool, postgres_keepalive, which
+ * knows what a connection here actually is.
+ */
+static ngx_int_t
+ngx_postgres_postconfiguration(ngx_conf_t *cf)
+{
+    ngx_http_upstream_main_conf_t      *umcf;
+    ngx_http_upstream_srv_conf_t      **uscfp;
+    ngx_postgres_upstream_srv_conf_t   *pgscf;
+    ngx_uint_t                          i;
+
+    umcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_upstream_module);
+
+    if (umcf == NULL) {
+        return NGX_OK;
+    }
+
+    uscfp = umcf->upstreams.elts;
+
+    for (i = 0; i < umcf->upstreams.nelts; i++) {
+
+        /* an implicit upstream has no srv_conf array and cannot be ours */
+        if (uscfp[i]->srv_conf == NULL) {
+            continue;
+        }
+
+        if (uscfp[i]->peer.init_upstream != ngx_postgres_upstream_init) {
+            continue;
+        }
+
+        pgscf = ngx_http_conf_upstream_srv_conf(uscfp[i], ngx_postgres_module);
+
+        if (pgscf == NULL
+            || pgscf->servers == NULL
+            || pgscf->servers->nelts == 0)
+        {
+            continue;
+        }
+
+        if (uscfp[i]->peer.init != ngx_postgres_upstream_init_peer) {
+            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, cf->log, 0,
+                           "postgres: taking the peer of upstream \"%V\" back "
+                           "from another module", &uscfp[i]->host);
+
+            uscfp[i]->peer.init = ngx_postgres_upstream_init_peer;
+        }
+    }
+
+    return NGX_OK;
+}
+
 
 ngx_conf_enum_t ngx_postgres_requirement_options[] = {
     { ngx_string("optional"), 0 },
