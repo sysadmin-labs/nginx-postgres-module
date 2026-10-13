@@ -167,10 +167,11 @@ fi
 echo "--- what the pool left behind ---"
 sleep 2
 after=$(backend_connections)
-# A pool of MAX may hold MAX connections, and one more may be on its way
-# out.  Anything beyond that means connections are being opened and not
-# given back, which is the failure this script exists for.
-limit=$((before + MAX + 1))
+# Two upstreams are configured here, "pool" and "rejecting", and each has a
+# pool of its own with MAX slots; one more connection may be on its way out.
+# Anything beyond that means connections are being opened and not given
+# back, which is the failure this script exists for.
+limit=$((before + 2 * MAX + 1))
 if [ "${after:-99}" -le "$limit" ]; then
 	echo "  $after connections, at most $limit allowed with max=$MAX"
 else

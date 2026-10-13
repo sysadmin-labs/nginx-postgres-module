@@ -269,7 +269,11 @@ is duplicate
         postgres_query "select answer from single";
         postgres_output value;
     }
---- pipelined_requests eval
+# Four separate requests, not pipelined.  nginx closes a connection after
+# an error response, so the second request of a pipeline that starts with a
+# 500 never gets an answer -- which says nothing about the pool and
+# everything about HTTP.
+--- request eval
 ["GET /bad", "GET /good", "GET /bad", "GET /good"]
 --- error_code eval
 [500, 200, 500, 200]
