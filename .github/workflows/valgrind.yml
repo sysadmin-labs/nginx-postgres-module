@@ -48,6 +48,11 @@ jobs:
           # Test::Nginx keeps the server's log under t/servroot, and prove
           # prints only the warnings it recognises.  A failure that is about
           # what the module did needs the rest of it.
+          conf=t/servroot/conf/nginx.conf
+          if [ -s "$conf" ]; then
+            echo "--- $conf, as the last block left it ---"
+            cat "$conf"
+          fi
           log=t/servroot/logs/error.log
           if [ -s "$log" ]; then
             echo "--- $log, last 200 lines ---"
