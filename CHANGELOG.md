@@ -2,7 +2,7 @@
 
 Newest first.  Dates are release dates.
 
-## Unreleased
+## 1.0.0 (2026-10-13)
 
 ### Fixed
 
