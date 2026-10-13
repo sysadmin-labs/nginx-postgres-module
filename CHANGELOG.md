@@ -77,6 +77,15 @@ Newest first.  Dates are release dates.
 
 ### Added
 
+- A note worth writing down, because it cost two rounds here and would cost
+  anyone else the same: **a `return` in a location with a content handler
+  fires in the rewrite phase**, so the handler never runs.  Ten blocks and
+  two cases in `ci/pool.sh` used `return 204` to get a response with no
+  body; none of them asked the database anything, and `ci/pool.sh` reported
+  ten slow requests answering instantly as a pass.  `postgres_output none`
+  is the way to say "no body" -- the module then answers 200 with an empty
+  one.
+
 - A test suite that needs nothing but nginx, this module and a PostgreSQL.
   The one that came with the module needs `ngx_echo`, `ngx_rds_json`,
   `ngx_eval` and `ngx_form_input`: four foreign modules to ask this one a

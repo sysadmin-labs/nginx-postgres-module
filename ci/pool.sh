@@ -100,18 +100,20 @@ http {
             postgres_output value;
         }
 
+        # No "return" in either of these.  A return in a location with a
+        # content handler fires in the rewrite phase, the handler never
+        # runs, and the answer comes back without the database having been
+        # asked anything -- which looks like a pass and tests nothing.
         location = /slow {
             postgres_pass pool;
             postgres_query "select pg_sleep(1), 'slept' as what";
             postgres_output none;
-            return 204;
         }
 
         location = /reject {
             postgres_pass rejecting;
             postgres_query "select pg_sleep(1), 'slept' as what";
             postgres_output none;
-            return 204;
         }
 
         location = /alive {
@@ -187,10 +189,10 @@ while [ "$i" -lt 10 ]; do
 done
 wait
 
-if [ "$(grep -c '^204$' "$WORK/out/slow.txt" || true)" -eq 10 ]; then
-	echo "  all ten answered 204; overflow=ignore means they wait rather than fail"
+if [ "$(grep -c '^200$' "$WORK/out/slow.txt" || true)" -eq 10 ]; then
+	echo "  all ten answered; overflow=ignore means they wait rather than fail"
 else
-	note "the slow requests did not all answer 204"
+	note "the slow requests did not all answer 200"
 	sort "$WORK/out/slow.txt" | uniq -c | sed 's/^/  /' >&2
 fi
 
@@ -204,10 +206,12 @@ while [ "$i" -lt 10 ]; do
 done
 wait
 
-ok=$(grep -c '^204$' "$WORK/out/reject.txt" || true)
+ok=$(grep -c '^200$' "$WORK/out/reject.txt" || true)
 rejected=$(grep -c '^503$' "$WORK/out/reject.txt" || true)
 if [ "$((ok + rejected))" -eq 10 ] && [ "$rejected" -gt 0 ]; then
 	echo "  $ok answered, $rejected rejected with 503, which is what reject means"
+	grep -c 'rejecting request to upstream' "$WORK/logs/error.log" |
+		sed 's/^/  the module said so /'
 else
 	note "expected some 503s and nothing else: $ok answered, $rejected rejected"
 	sort "$WORK/out/reject.txt" | uniq -c | sed 's/^/  /' >&2

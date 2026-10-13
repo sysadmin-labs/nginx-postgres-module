@@ -106,12 +106,11 @@ received NULL value
 
 
 === TEST 6: a required field that is NULL
-# "required" writes a line in the error log and leaves the variable empty.
-# It does not produce a 500, which is what the documentation this module
-# came with has always claimed; no version of it ever set a status here.
-# And it only says anything at all when something reads the variable: the
-# check lives in the variable's own get_handler, which a request that never
-# looks at it never reaches.
+# "required" answers 500 and says why in the error log, which is what the
+# documentation says -- but only when something reads the variable.  The
+# check lives in the variable's own get_handler, so a request that never
+# looks at it never reaches the check: a "return 204" in this location would
+# answer 204 and ask the database nothing at all.
 --- http_config
     upstream pg {
         postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
@@ -126,9 +125,7 @@ received NULL value
     }
 --- request
 GET /t
---- error_code: 200
---- response_headers
-X-Name: []
+--- error_code: 500
 --- error_log
 requires non-NULL value
 
@@ -149,9 +146,7 @@ requires non-NULL value
     }
 --- request
 GET /t
---- error_code: 200
---- response_headers
-X-Name: []
+--- error_code: 500
 --- error_log
 out of range of the received result-set
 
@@ -172,9 +167,7 @@ out of range of the received result-set
     }
 --- request
 GET /t
---- error_code: 200
---- response_headers
-X-Paws: []
+--- error_code: 500
 --- error_log
 wasn't found in the received result-set
 
