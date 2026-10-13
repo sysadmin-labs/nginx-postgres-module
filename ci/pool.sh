@@ -237,4 +237,16 @@ else
 	echo "  no alert, no emerg, no signal"
 fi
 
+# A failure here is about what the module did under load, and the error log
+# is where it said so.  Printing it only on a failure keeps a good run quiet.
+if [ "$fail" -ne 0 ]; then
+	echo >&2
+	echo "--- the error log, last 40 lines ---" >&2
+	tail -40 "$WORK/logs/error.log" >&2 2>/dev/null || true
+	echo >&2
+	echo "--- what the module said, counted ---" >&2
+	sed -n 's/.*\[error\][^:]*: //p' "$WORK/logs/error.log" 2>/dev/null |
+		sed 's/[0-9][0-9]*/N/g' | sort | uniq -c | sort -rn | head -10 >&2
+fi
+
 exit $fail
