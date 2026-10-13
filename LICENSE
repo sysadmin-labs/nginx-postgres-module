@@ -1,4 +1,13 @@
-Copyright (c) 2026, Jochen Neumeister <joneum@FreeBSD.org>
+The module in src/ is FRiCKLE's, Xiaozhe Wang's and Yichun Zhang's, under
+the terms below.  Individual files there carry further notices of their own
+-- ngx_postgres_keepalive.c names Maxim Dounin, ngx_postgres_util.c names
+Igor Sysoev -- and those stayed where they are.
+
+The build and test scaffolding around all of it -- ci/, t/, .github/,
+config and the documentation -- is not their work and is covered by the same
+terms, held by:
+
+    Copyright (c) 2026, Jochen Neumeister <joneum@FreeBSD.org>
 
 Copyright (c) 2010, FRiCKLE Piotr Sikora <info@frickle.com>
 Copyright (c) 2009-2010, Xiaozhe Wang <chaoslawful@gmail.com>
