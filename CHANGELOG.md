@@ -6,6 +6,27 @@ Newest first.  Dates are release dates.
 
 ### Fixed
 
+- The module did not build with gcc 12 or later.  `if (pgdt->statements)`
+  asks whether an array inside a structure is NULL, which it never is, and
+  `-Werror=address` refuses the comparison.  Behind that one line were two
+  more things:
+
+  - **The table of prepared statements wrote past its end.**  It holds 256
+    hashes per connection; the search loop leaves its index at 256 when
+    nothing matched and nothing is free, and the old code then assigned to
+    `statements[256]`, on top of whatever the structure keeps after it.  A
+    connection that had seen 256 distinct queries was enough to trigger it.
+    A query now goes out with its parameters when the table is full, which
+    is what the other branch of that `if` always did -- and that branch had
+    never run, because the condition could not be false.
+
+  - **`PQprepare` leaked its result and its failures were ignored.**  Every
+    statement prepared leaked a `PGresult`, and a `PQprepare` that failed
+    still had its hash written into the table, after which every later
+    request on that connection asked the server for a statement it does not
+    have.  The result is freed, a failure is logged and not remembered, and
+    the query goes out with its parameters instead.
+
 - `postgres_output json` put a NUL byte after the closing bracket and
   counted it in `Content-Length`, so what a client received was not JSON.
   Both paths did it -- the array and the single `json` column that is passed

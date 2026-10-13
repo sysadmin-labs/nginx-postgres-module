@@ -573,48 +573,98 @@ ngx_postgres_upstream_send_query(ngx_http_request_t *r, ngx_connection_t *pgxc,
 
         //for (int i = 0; i < paramnum; i++)
         //    fprintf(stdout, "Prepared param #%d [%d] %s %p \n", i, Types[i], Values[i], Values[i]);
-        if (pgdt->statements) {
-            // hash query
-            ngx_uint_t prepared_hash = ngx_hash_key(query, strlen((char *) query));
-            char *prepared_name = ngx_pnalloc(r->pool, 32);
-            sprintf(prepared_name, "test%lu", ( unsigned long )prepared_hash);
+        /* Prepared statements are remembered per connection, by hash, in a
+         * table of NGX_POSTGRES_MAX_STATEMENTS entries.  Three things about
+         * this used to be wrong.
+         *
+         * The condition was "if (pgdt->statements)", and statements is an
+         * array inside the structure, so it was always true: the other
+         * branch -- sending the query with its parameters and preparing
+         * nothing -- had never run since it was written.  gcc 12 and later
+         * refuse the comparison outright under -Werror=address, which is
+         * how this came to light.
+         *
+         * The table filling up wrote past its end.  The loop below leaves n
+         * at NGX_POSTGRES_MAX_STATEMENTS when nothing matched and nothing is
+         * free, and the old code then assigned to statements[n] -- one past
+         * the last element, on top of whatever the structure keeps there.
+         * A connection that saw that many distinct queries was enough.
+         *
+         * And PQprepare hands back a result that has to be freed.  It never
+         * was, so every statement prepared leaked it; and because the
+         * result was not looked at either, a failed PQprepare still had its
+         * hash written into the table, after which every later request on
+         * that connection asked for a statement the server does not have.
+         */
+        ngx_uint_t  prepared_hash = ngx_hash_key(query, ngx_strlen(query));
+        ngx_uint_t  n, matched = 0;
 
-            // find if query was prepared for this connection
-            ngx_uint_t n = 0;
-            int matched = 0;
-            for (; n < 256 && pgdt->statements[n]; n++) {
-                if (pgdt->statements[n] == prepared_hash) {
-                    matched = 1;
-                    //fprintf(stdout, "Found prepared query %s %lu\n", query, n);
-                    break;
-                } else {
-                    //fprintf(stdout, "%d != %d\n", *(pgdt->statements + n), prepared_hash);
-                }
+        for (n = 0; n < NGX_POSTGRES_MAX_STATEMENTS && pgdt->statements[n]; n++) {
+            if (pgdt->statements[n] == prepared_hash) {
+                matched = 1;
+                break;
             }
-            //fprintf(stdout, "statements [%p]\n", pgdt->statements);
+        }
 
-            // prepare query synchronously the first time
-            if (matched == 0) {
-               //fprintf(stdout, "Preparing query [%d] %s\n", n, query);
+        if (!matched && n == NGX_POSTGRES_MAX_STATEMENTS) {
+            /* No room left: send the query with its parameters instead, and
+             * say so once rather than on every request.
+             */
+            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, pgxc->log, 0,
+                           "postgres: %ui prepared statements on this "
+                           "connection, sending this one unprepared",
+                           (ngx_uint_t) NGX_POSTGRES_MAX_STATEMENTS);
 
-                PQprepare(pgdt->pgconn,
-                                    prepared_name,
-                                    (char *) query,
-                                    paramnum,
-                                    Types);
-                pgdt->statements[n] = prepared_hash;
-                //fprintf(stdout, "Preparing query [%d] %d\n",n, prepared_hash);
+            pgrc = PQsendQueryParams(pgdt->pgconn, (const char *) query,
+                                     paramnum, Types,
+                                     (const char **) Values, NULL, NULL, 0);
 
-            }
-
-            pgrc = PQsendQueryPrepared(pgdt->pgconn,
-                             prepared_name,
-                             paramnum,(const char** )Values,NULL,NULL,0);
-
-            dd("Sent query prepared");
         } else {
-            pgrc = PQsendQueryParams(pgdt->pgconn, (const char *) query, paramnum, Types, (const char** )Values, NULL, NULL, 0);
-            //fprintf(stdout, "Sent query unprepared [%d] \n", pgrc);
+            char      *prepared_name;
+            PGresult  *pres;
+            ngx_uint_t ready = matched;
+
+            prepared_name = ngx_pnalloc(r->pool,
+                                        sizeof("ngxp") + NGX_INT_T_LEN);
+            if (prepared_name == NULL) {
+                dd("returning NGX_ERROR");
+                return NGX_ERROR;
+            }
+
+            ngx_sprintf((u_char *) prepared_name, "ngxp%ui%Z", prepared_hash);
+
+            if (!matched) {
+                pres = PQprepare(pgdt->pgconn, prepared_name, (char *) query,
+                                 paramnum, Types);
+
+                if (pres != NULL && PQresultStatus(pres) == PGRES_COMMAND_OK) {
+                    pgdt->statements[n] = prepared_hash;
+                    ready = 1;
+
+                } else {
+                    ngx_log_error(NGX_LOG_ERR, pgxc->log, 0,
+                                  "postgres: failed to prepare statement: %s",
+                                  PQerrorMessage(pgdt->pgconn));
+                }
+
+                PQclear(pres);
+            }
+
+            if (ready) {
+                pgrc = PQsendQueryPrepared(pgdt->pgconn, prepared_name,
+                                           paramnum, (const char **) Values,
+                                           NULL, NULL, 0);
+                dd("Sent query prepared");
+
+            } else {
+                /* Nothing was remembered, so the next request tries again
+                 * and this one goes out with its parameters.
+                 */
+                pgrc = PQsendQueryParams(pgdt->pgconn, (const char *) query,
+                                         paramnum, Types,
+                                         (const char **) Values,
+                                         NULL, NULL, 0);
+            }
         }
     } else {
 

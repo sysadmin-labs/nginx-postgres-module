@@ -35,6 +35,14 @@
 #include <libpq-fe.h>
 
 
+/* How many prepared statements a single connection remembers.  The table is
+ * part of the connection structure, so this is a fixed size; when it is full
+ * a query goes out with its parameters instead of being prepared, which is
+ * what ngx_postgres_upstream_send_query() does.
+ */
+#define NGX_POSTGRES_MAX_STATEMENTS  256
+
+
 extern ngx_module_t  ngx_postgres_module;
 
 
