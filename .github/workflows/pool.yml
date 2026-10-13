@@ -1,0 +1,45 @@
+name: Pool
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Monday morning, so a new nginx release that breaks the module shows
+    # up here and not in somebody's build
+    - cron: '47 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pool:
+    name: many requests through one keepalive pool
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Test::Nginx sends a request and waits for the answer, so the pool is
+    # never under pressure in t/: a module that opened a connection per
+    # request and never gave one back would pass every block there and take
+    # a database down in production.  Here forty requests arrive at once
+    # through a pool of two, and afterwards pg_stat_activity is asked how
+    # many connections are left.
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup
+        with:
+          test-nginx: 'false'
+          packages: libpq-dev postgresql postgresql-client
+
+      - name: Build nginx
+        run: |
+          . .github/versions.env
+          ci/build.sh "$NGINX_VERSION" "$HOME/nginx"
+
+      - name: Start a PostgreSQL
+        run: ci/postgres.sh
+
+      - name: Forty at once through a pool of two
+        run: ci/pool.sh "$HOME/nginx/sbin/nginx"

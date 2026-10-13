@@ -1,0 +1,266 @@
+# vi:ft=perl
+#
+# What the module does when the database, the query or the configuration
+# will not do what was asked.  The oracle is both halves: what the client
+# sees, and what the error log says about it -- a 500 with nothing written
+# down is barely better than a hang.
+
+use Test::Nginx::Socket 'no_plan';
+
+repeat_each(2);
+
+run_tests();
+
+__DATA__
+
+=== TEST 1: a query the database refuses
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select * from no_such_table";
+        postgres_output text;
+    }
+--- request
+GET /t
+--- error_code: 500
+--- error_log
+failed to receive result
+
+
+
+=== TEST 2: the database is not listening
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15499 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select 1";
+        postgres_output value;
+        postgres_connect_timeout 2s;
+    }
+--- request
+GET /t
+--- error_code: 502
+
+
+
+=== TEST 3: a database that does not exist
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=no_such_database user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select 1";
+        postgres_output value;
+    }
+--- request
+GET /t
+--- error_code: 502
+
+
+
+=== TEST 4: "value" output with more than one value
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select name from cats";
+        postgres_output value;
+    }
+--- request
+GET /t
+--- error_code: 500
+--- error_log
+received 3 value(s) instead of expected single value
+
+
+
+=== TEST 5: "value" output with a NULL
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select name from cats where id = 2";
+        postgres_output value;
+    }
+--- request
+GET /t
+--- error_code: 500
+--- error_log
+received NULL value
+
+
+
+=== TEST 6: a required field that is NULL
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select name from cats where id = 2";
+        postgres_output none;
+        postgres_set $name 0 0 required;
+        return 204;
+    }
+--- request
+GET /t
+--- error_code: 500
+
+
+
+=== TEST 7: a required field in a row that is not there
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select name from cats where id = 99";
+        postgres_output none;
+        postgres_set $name 0 0 required;
+        return 204;
+    }
+--- request
+GET /t
+--- error_code: 500
+
+
+
+=== TEST 8: a column that is not in the result
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select name from cats order by id";
+        postgres_output none;
+        postgres_set $paws 0 paws required;
+        return 204;
+    }
+--- request
+GET /t
+--- error_code: 500
+
+
+
+=== TEST 9: an output format that does not exist
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select 1";
+        postgres_output yaml;
+    }
+--- must_die
+--- error_log
+invalid value "yaml"
+
+
+
+=== TEST 10: a rewrite condition that does not exist
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select 1";
+        postgres_rewrite sometimes 418;
+    }
+--- must_die
+
+
+
+=== TEST 11: postgres_pass to an upstream that does not exist
+--- config
+    location = /t {
+        postgres_pass no_such_upstream;
+        postgres_query "select 1";
+    }
+--- must_die
+
+
+
+=== TEST 12: postgres_output twice in one location
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select 1";
+        postgres_output text;
+        postgres_output json;
+    }
+--- must_die
+--- error_log
+is duplicate
+
+
+
+=== TEST 13: two queries for the same method
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query GET "select 1";
+        postgres_query GET "select 2";
+    }
+--- must_die
+--- error_log
+is duplicate
+
+
+
+=== TEST 14: the worker survives a query that failed
+# The connection is the thing: a failed query must not take the pool with
+# it, so a good query right after a bad one has to work.
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+        postgres_keepalive max=2;
+    }
+--- config
+    location = /bad {
+        postgres_pass pg;
+        postgres_query "select * from no_such_table";
+        postgres_output text;
+    }
+    location = /good {
+        postgres_pass pg;
+        postgres_query "select answer from single";
+        postgres_output value;
+    }
+--- pipelined_requests eval
+["GET /bad", "GET /good", "GET /bad", "GET /good"]
+--- error_code eval
+[500, 200, 500, 200]
+--- no_error_log
+[alert]
