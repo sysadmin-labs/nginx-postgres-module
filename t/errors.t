@@ -196,7 +196,7 @@ wasn't found in the received result-set
     }
 --- must_die
 --- error_log
-invalid value "yaml"
+invalid output format "yaml"
 
 
 

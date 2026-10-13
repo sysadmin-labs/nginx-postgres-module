@@ -42,6 +42,20 @@ jobs:
           TEST_NGINX_USE_VALGRIND=1 TEST_NGINX_BINARY="$HOME/nginx/sbin/nginx" \
             prove -r t/ 2>&1 | tee valgrind.log
 
+      - name: What nginx said, if something failed
+        if: failure()
+        run: |
+          # Test::Nginx keeps the server's log under t/servroot, and prove
+          # prints only the warnings it recognises.  A failure that is about
+          # what the module did needs the rest of it.
+          log=t/servroot/logs/error.log
+          if [ -s "$log" ]; then
+            echo "--- $log, last 200 lines ---"
+            tail -200 "$log"
+          else
+            echo "no $log"
+          fi
+
       - name: No findings allowed
         run: |
           if grep -niE "invalid read|invalid write|definitely lost|indirectly lost|uninitialised|uninitialized value|conditional jump|mismatched free" valgrind.log; then

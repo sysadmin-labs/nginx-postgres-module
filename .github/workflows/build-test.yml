@@ -58,6 +58,20 @@ jobs:
       - name: Run the test suite
         run: TEST_NGINX_BINARY="$HOME/nginx/sbin/nginx" prove -r t/
 
+      - name: What nginx said, if something failed
+        if: failure()
+        run: |
+          # Test::Nginx keeps the server's log under t/servroot, and prove
+          # prints only the warnings it recognises.  A failure that is about
+          # what the module did needs the rest of it.
+          log=t/servroot/logs/error.log
+          if [ -s "$log" ]; then
+            echo "--- $log, last 200 lines ---"
+            tail -200 "$log"
+          else
+            echo "no $log"
+          fi
+
   dynamic:
     name: loadable module
     needs: pins
@@ -86,3 +100,17 @@ jobs:
           echo "loading:$mods"
           TEST_NGINX_LOAD_MODULES="$mods" \
             TEST_NGINX_BINARY="$HOME/nginx/sbin/nginx" prove -r t/
+
+      - name: What nginx said, if something failed
+        if: failure()
+        run: |
+          # Test::Nginx keeps the server's log under t/servroot, and prove
+          # prints only the warnings it recognises.  A failure that is about
+          # what the module did needs the rest of it.
+          log=t/servroot/logs/error.log
+          if [ -s "$log" ]; then
+            echo "--- $log, last 200 lines ---"
+            tail -200 "$log"
+          else
+            echo "no $log"
+          fi
