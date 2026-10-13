@@ -6,6 +6,21 @@ Newest first.  Dates are release dates.
 
 ### Fixed
 
+- A `postgres_rewrite` entry was used before it was filled in.
+  `ngx_array_push()` hands back whatever was in that memory, and the
+  directive sets only `key` and `status`: `location` is assigned only when
+  the third argument is *not* a status code, so for every ordinary
+  `postgres_rewrite <condition> <status>` it stayed as it was found.
+  `ngx_postgres_rewrite()` then reads `location.len` on every match, and
+  acts on a pointer from the same memory if that length looks non-zero.
+  valgrind named it exactly: "Conditional jump or move depends on
+  uninitialised value(s)".
+
+  Noticed while reading that code, not changed: a third argument that is not
+  a status code is silently taken as a redirect target, and `status` is then
+  left at what `ngx_atoi()` returned for it.  Upstream refused such an
+  argument -- the `return NGX_CONF_ERROR` is still there, commented out.
+
 - **`postgres_escape` killed the worker on nginx 1.30.4 and later**, in the
   rewrite phase of the first request that reached a location using it, and
   with `master_process off` not even a signal was logged.

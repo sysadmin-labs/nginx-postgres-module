@@ -1030,6 +1030,16 @@ found:
             return NGX_CONF_ERROR;
         }
 
+        /* ngx_array_push() hands back whatever was in that memory.  Only
+         * key and status are filled in below; location is set only when the
+         * third argument is not a status code, so for every ordinary
+         * "postgres_rewrite <condition> <status>" it stayed as it was found
+         * -- and ngx_postgres_rewrite() reads location.len on every match.
+         * valgrind said so: "Conditional jump or move depends on
+         * uninitialised value(s)" in ngx_postgres_rewrite().
+         */
+        ngx_memzero(rewrite, sizeof(ngx_postgres_rewrite_t));
+
         pgrcf->methods_set |= methods;
     }
 
