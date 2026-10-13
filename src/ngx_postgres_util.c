@@ -356,6 +356,9 @@ ngx_postgres_rewrite_value(ngx_conf_t *cf, ngx_postgres_rewrite_loc_conf_t *lcf,
     ngx_http_script_compile_t              sc;
     ngx_http_script_value_code_t          *val;
     ngx_http_script_complex_value_code_t  *complex;
+#if NGX_POSTGRES_HAVE_COMPLEX_VALUE_END
+    ngx_http_script_complex_value_end_code_t  *complex_end;
+#endif
 
     n = ngx_http_script_variables_count(value);
 
@@ -401,6 +404,37 @@ ngx_postgres_rewrite_value(ngx_conf_t *cf, ngx_postgres_rewrite_loc_conf_t *lcf,
     if (ngx_http_script_compile(&sc) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
+
+#if NGX_POSTGRES_HAVE_COMPLEX_VALUE_END
+
+    /* What nginx's own ngx_http_rewrite_value() does, and has to be done
+     * here too, because this function is a copy of it.
+     *
+     * Up to nginx 1.30.3 and 1.31.2, ngx_http_script_complex_value_code()
+     * both allocated the buffer and left the finished value on the script
+     * engine's stack.  The fix for CVE-2026-42533 -- a heap buffer overflow
+     * in that engine, with the map directive and with non-cacheable
+     * variables -- split those apart: the allocation stayed where it was and
+     * the push onto the stack moved into a new code that has to be appended
+     * after the value has been compiled.
+     *
+     * Without it nothing is pushed, and ngx_postgres_escape_string(), which
+     * reads e->sp - 1, reads and then writes one slot below the base of that
+     * stack.  What that costs is not an error message: nginx dies in the
+     * rewrite phase of the first request that reaches a location with a
+     * postgres_escape in it, and with master_process off there is not even a
+     * signal in the log to say so.
+     */
+    complex_end = ngx_http_script_add_code(lcf->codes,
+                              sizeof(ngx_http_script_complex_value_end_code_t),
+                              &complex);
+    if (complex_end == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    complex_end->code = ngx_http_script_complex_value_end_code;
+
+#endif
 
     return NGX_CONF_OK;
 }

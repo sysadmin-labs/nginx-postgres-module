@@ -35,6 +35,19 @@
 extern ngx_module_t  ngx_http_rewrite_module;
 
 
+/* ngx_http_script_complex_value_end_code() exists from nginx 1.30.4 in the
+ * stable branch and from 1.31.3 in the mainline one -- it came with the fix
+ * for CVE-2026-42533 -- and not before.  Two ranges, because the two
+ * branches were given it at different points.
+ */
+#if (nginx_version >= 1031003) \
+    || (nginx_version >= 1030004 && nginx_version < 1031000)
+#define NGX_POSTGRES_HAVE_COMPLEX_VALUE_END  1
+#else
+#define NGX_POSTGRES_HAVE_COMPLEX_VALUE_END  0
+#endif
+
+
 typedef struct {
     ngx_array_t  *codes;        /* uintptr_t */
 

@@ -6,6 +6,30 @@ Newest first.  Dates are release dates.
 
 ### Fixed
 
+- **`postgres_escape` killed the worker on nginx 1.30.4 and later**, in the
+  rewrite phase of the first request that reached a location using it, and
+  with `master_process off` not even a signal was logged.
+
+  This function builds rewrite-module codes by hand, which means it carries
+  a copy of nginx's `ngx_http_rewrite_value()` -- and a copy from 2017.  Up
+  to 1.30.3 and 1.31.2, `ngx_http_script_complex_value_code()` both
+  allocated the buffer and left the finished value on the script engine's
+  stack.  The fix for CVE-2026-42533 -- a heap buffer overflow in that
+  engine, with the `map` directive and with non-cacheable variables -- split
+  the two apart, and the push onto the stack moved into a new
+  `ngx_http_script_complex_value_end_code` that has to be appended after the
+  value is compiled.
+
+  Without it nothing is pushed, and `ngx_postgres_escape_string()`, which
+  reads `e->sp - 1`, reads and then writes one slot below the base of that
+  stack.  The end code is appended now, guarded by version: the stable
+  branch got it in 1.30.4, the mainline one in 1.31.3.
+
+  The deeper problem is not fixed and is worth naming: this module mirrors
+  nginx's private `ngx_http_rewrite_loc_conf_t` and reimplements one of its
+  static functions.  Every nginx release can break that, and this is the
+  second time it has.
+
 - **Every request answered 502 on nginx 1.30 and later.**  That release
   brought the change "now the keepalive directive in the upstream block is
   enabled by default", and its keepalive module walks every explicit
