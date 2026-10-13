@@ -146,6 +146,8 @@ ngx_postgres_output_hex(ngx_http_request_t *r, PGresult *res)
     ngx_chain_t               *cl;
     ngx_buf_t                 *b;
     size_t                     size;
+    size_t                     start;
+    char                      *value;
 
     dd("entering");
 
@@ -189,7 +191,41 @@ ngx_postgres_output_hex(ngx_http_request_t *r, PGresult *res)
         return NGX_DONE;
     }
 
-    b = ngx_create_temp_buf(r->pool, floor(size / 2));
+    value = PQgetvalue(res, 0, 0);
+
+    /* "\x" in front of it is how PostgreSQL writes a bytea by default; a
+     * value stored the old way, or any other text, comes without it.
+     */
+    start = 0;
+    if (value[start] == '\\') {
+        start++;
+    }
+    if (start < size && value[start] == 'x') {
+        start++;
+    }
+
+    /* Two characters make one byte, so an odd number of them is not a hex
+     * string at all.  This used to size the buffer at size / 2 and then
+     * write one byte per *pair including the half pair at the end*, which
+     * for any odd-length value without the "\x" in front of it wrote one
+     * byte past the end of a buffer taken from the request pool.  The
+     * check that says so is at the end of this function; it was commented
+     * out.
+     */
+    if ((size - start) % 2) {
+        clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "postgres: \"postgres_output hex\" received a value of "
+                      "%uz characters, which is not a hex string, in location "
+                      "\"%V\"", size - start, &clcf->name);
+
+        dd("returning NGX_DONE, status NGX_HTTP_INTERNAL_SERVER_ERROR");
+        pgctx->status = NGX_HTTP_INTERNAL_SERVER_ERROR;
+        return NGX_DONE;
+    }
+
+    b = ngx_create_temp_buf(r->pool, (size - start) / 2);
     if (b == NULL) {
         dd("returning NGX_ERROR");
         return NGX_ERROR;
@@ -205,20 +241,14 @@ ngx_postgres_output_hex(ngx_http_request_t *r, PGresult *res)
     b->memory = 1;
     b->tag = r->upstream->output.tag;
 
-    char *value = PQgetvalue(res, 0, 0);
-
-    unsigned int start = 0;
-    if (value[start] == '\\')
-        start++;
-    if (value[start] == 'x')
-        start++;
-
-    for (; start < size; start += 2)
+    for (; start < size; start += 2) {
         *(b->last++) = hex2bin(value + start);
-    //if (b->last != b->end) {
-    //    dd("returning NGX_ERROR");
-    //    return NGX_ERROR;
-    //}
+    }
+
+    if (b->last != b->end) {
+        dd("returning NGX_ERROR");
+        return NGX_ERROR;
+    }
 
     cl->next = NULL;
 
@@ -806,7 +836,20 @@ ngx_postgres_output_json(ngx_http_request_t *r, PGresult *res)
                     col_type = PQftype(res, col);
                     int col_length = PQgetlength(res, row, col);
 
-                    if ((col_type < 20 || col_type > 23) && (col_type != 3802 && col_type != 114)) { //not numbers or json
+                    /* The "|| col_length == 0" is here because the
+                     * writing pass below has it too: a value of no length
+                     * is written as "" whatever its type is.  Without it
+                     * the two passes disagree -- an empty value of a type
+                     * inside the numeric range books no quotes here and
+                     * then has two of them written, one past the end of the
+                     * buffer.  An int2vector, type 22 and inside that
+                     * range, is empty whenever it holds no elements, so
+                     * this is reachable from a query.
+                     */
+                    if (((col_type < 20 || col_type > 23)
+                         && (col_type != 3802 && col_type != 114))
+                        || col_length == 0)
+                    {
                         size += sizeof("\"\"") - 1;
 
                         char *col_value = PQgetvalue(res, row, col);
@@ -866,11 +909,25 @@ ngx_postgres_output_json(ngx_http_request_t *r, PGresult *res)
 
                 ngx_uint_t meta_variable_hash = ngx_hash_key(export_variable.data, export_variable.len);
                 ngx_http_variable_value_t *raw_meta = ngx_http_get_variable( r->main, &export_variable, meta_variable_hash  );
-                if (!raw_meta->not_found && raw_meta->len == 0) {
-                    raw_meta->valid = 1;
+
+                /* NULL, not merely not_found: ngx_http_get_variable()
+                 * returns that when a variable's own get_handler fails or
+                 * when it cannot allocate.  Every caller in nginx checks
+                 * for it; this one dereferenced it.
+                 */
+                if (raw_meta != NULL && !raw_meta->not_found
+                    && raw_meta->len == 0)
+                {
                     int exported_length = PQgetlength(res, 0, col);
                     char *exported_value = ngx_palloc(r->main->pool, exported_length);
+
+                    if (exported_value == NULL) {
+                        dd("returning NGX_ERROR");
+                        return NGX_ERROR;
+                    }
+
                     ngx_memcpy(exported_value, PQgetvalue(res, 0, col), exported_length);
+                    raw_meta->valid = 1;
                     raw_meta->len = exported_length;
                     raw_meta->data = (unsigned char*)exported_value;
                 }

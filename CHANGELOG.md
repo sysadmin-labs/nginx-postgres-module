@@ -6,6 +6,29 @@ Newest first.  Dates are release dates.
 
 ### Fixed
 
+- **`postgres_output hex` wrote past the end of its buffer.**  It takes the
+  buffer at half the length of the value and then writes one byte per pair
+  of characters *including a half pair at the end*, so any value of odd
+  length that does not start with `\x` -- `select 'abc'` is enough -- put
+  one byte into the request pool past where it was allowed to.  The length
+  is computed from what is actually decoded now, an odd number of characters
+  is refused as not being a hex string, and the check that would have said
+  so in the first place is no longer commented out.
+
+- **`postgres_output json` had the same disagreement in the other
+  direction.**  The pass that counts bytes and the pass that writes them
+  used different conditions: the writing pass quotes a value of no length
+  whatever its type, the counting pass did not.  An `int2vector` is type 22,
+  inside the range both passes treat as numeric, and it is empty whenever it
+  holds no elements -- `select ''::int2vector` -- so two quotes were written
+  that nobody had counted.
+
+- `ngx_http_get_variable()` was dereferenced without checking for NULL, in
+  the block that copies column names into the parent request's variables.
+  It returns NULL when a variable's own `get_handler` fails or when it
+  cannot allocate, and every caller in nginx checks for that.  The
+  `ngx_palloc()` next to it was unchecked as well.
+
 - A `postgres_rewrite` entry was used before it was filled in.
   `ngx_array_push()` hands back whatever was in that memory, and the
   directive sets only `key` and `status`: `location` is assigned only when

@@ -359,3 +359,69 @@ POST /t
 GET /t
 --- response_body chop
 [{"a_bool":"t","a_smallint":42,"an_integer":123456,"a_bigint":1234567890123,"a_text":"text","a_date":"2026-10-13","a_null":null}]
+
+
+
+=== TEST 21: hex output decodes what PostgreSQL wrote
+# decode() returns a bytea, which PostgreSQL renders as "\x414243"; the
+# handler strips the prefix and turns each pair into a byte.
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select decode('414243', 'hex') as b";
+        postgres_output hex;
+    }
+--- request
+GET /t
+--- response_body chop
+ABC
+
+
+
+=== TEST 22: hex output refuses what is not a hex string
+# Two characters make one byte, so an odd number of them is not one.  This
+# used to size the buffer at half the length and then write one byte per
+# pair *including the half pair at the end*, one byte past the end of a
+# buffer from the request pool.
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select 'abc' as b";
+        postgres_output hex;
+    }
+--- request
+GET /t
+--- error_code: 500
+--- error_log
+which is not a hex string
+
+
+
+=== TEST 23: json output of an empty value whose type is a number
+# An int2vector is type 22, inside the range the json handler treats as
+# numeric and therefore writes unquoted -- but it is empty whenever it holds
+# no elements, and an empty value is written as "" whatever its type.  The
+# two passes of that handler disagreed about it: no quotes counted, two
+# quotes written.
+--- http_config
+    upstream pg {
+        postgres_server 127.0.0.1:15432 dbname=ngxtest user=postgres;
+    }
+--- config
+    location = /t {
+        postgres_pass pg;
+        postgres_query "select ''::int2vector as a, 1 as b";
+        postgres_output json;
+    }
+--- request
+GET /t
+--- response_body chop
+[{"a":"","b":1}]
